@@ -4,6 +4,34 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Archipelago Multiworld Event Tracker</title>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script>
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyDnybZiF21mCCEx1GZfO1KN8Mk-j0Laq-c",
+  authDomain: "archipelago-event-hub.firebaseapp.com",
+  projectId: "archipelago-event-hub",
+  storageBucket: "archipelago-event-hub.firebasestorage.app",
+  messagingSenderId: "125584614319",
+  appId: "1:125584614319:web:23064ef4508a53c251455a",
+  measurementId: "G-7027NN9NYD"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const HOST_UID = "oRImYRhTxIXaT60cBDkGSOJLjT72";
+    </script>
+
     <style>
         :root {
             --bg-main: #121214;
@@ -210,8 +238,9 @@
             <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Public Tracker / Host Console</div>
         </div>
         <div class="auth-panel" id="authPanel">
-            <input type="password" id="passwordInput" placeholder="Enter Host Key...">
-            <button onclick="login()">Login</button>
+            <input type="email" id="emailInput" placeholder="Host email">
+            <input type="password" id="passwordInput" placeholder="Host password">
+            <button onclick="login()">Host Login</button>
         </div>
     </header>
 
@@ -352,265 +381,343 @@ async function verifyHostIdentity() {
         { text: "2 free hints per player", type: "nice" }
     ];
 
-    let events = [];
 
-    function init() {
-        const stored = localStorage.getItem('ap_events_dashboard');
-        if (stored) {
-            try { events = JSON.parse(stored); } catch(e) { events = loadDefaults(); }
-        } else {
-            events = loadDefaults();
-        }
-        
-        // Verification session check
-        if (sessionStorage.getItem('host_verified') === 'true') {
-            enableHostMode();
-        }
-        
-        render();
+    let events = [];
+    let publicUnsubscribe = null;
+    let privateUnsubscribe = null;
+    let sortMode = null;
+    let sortAscending = true;
+
+    function firebaseConfigured() {
+        return !firebaseConfig.apiKey.startsWith("YOUR_") &&
+               !firebaseConfig.projectId.startsWith("YOUR_") &&
+               !HOST_UID.startsWith("YOUR_");
+    }
+
+    function escapeHtml(value) {
+        const div = document.createElement("div");
+        div.textContent = value == null ? "" : String(value);
+        return div.innerHTML;
     }
 
     function loadDefaults() {
         return defaultEvents.map((e, idx) => ({
-            id: idx,
-            text: e.text,
-            type: e.type,
-            known: false,
-            active: false
+            id: String(idx), text: e.text, type: e.type, known: false, active: false
         }));
     }
 
-    function save() {
-        localStorage.setItem('ap_events_dashboard', JSON.stringify(events));
+    // publicEvents is a deliberately separate collection. This prevents a player
+    // from downloading hidden events just because they are in the same collection.
+    function publicProjection(e) {
+        return {
+            text: e.text,
+            type: e.type,
+            known: !!e.known,
+            active: !!e.active,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
     }
 
-    async function login() {
-        const pin = document.getElementById('passwordInput').value;
+    async function seedDefaultsIfEmpty() {
+        const snap = await db.collection("events").limit(1).get();
+        if (!snap.empty) return;
 
-        if (!pin) {
-            alert("Please enter the Host Key.");
-            return;
-        }
+        const defaults = loadDefaults();
+        const batch = db.batch();
+        defaults.forEach(e => batch.set(db.collection("events").doc(e.id), e));
+        await batch.commit();
 
-        const hashedPin = await calculateSHA256(pin);
+        // Hidden defaults are intentionally NOT copied to publicEvents.
+        const publicBatch = db.batch();
+        defaults.filter(e => e.known || e.active).forEach(e => {
+            publicBatch.set(db.collection("publicEvents").doc(e.id), publicProjection(e));
+        });
+        await publicBatch.commit();
+    }
 
-        if (hashedPin === HASHED_PASSWORD_TARGET) {
-            sessionStorage.setItem('host_verified', 'true');
-            enableHostMode();
+    function listenPublicEvents() {
+        if (publicUnsubscribe) publicUnsubscribe();
+        publicUnsubscribe = db.collection("publicEvents").onSnapshot(snapshot => {
+            events = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             render();
-        } else {
-            alert("Unauthorized: Host key verification failed.");
-        }
+        }, error => {
+            console.error(error);
+            document.getElementById("public-event-list").innerHTML =
+                '<div class="no-results">Unable to load community events.</div>';
+        });
     }
 
-    function logout() {
-        sessionStorage.removeItem('host_verified');
-        document.body.classList.remove('is-host');
-        document.getElementById('authPanel').innerHTML = `
-            <input type="password" id="passwordInput" placeholder="Enter Host Key...">
-            <button onclick="login()">Login</button>
-        `;
-        render();
+    function listenPrivateEvents() {
+        if (privateUnsubscribe) privateUnsubscribe();
+        privateUnsubscribe = db.collection("events").onSnapshot(snapshot => {
+            events = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            render();
+        }, error => {
+            console.error(error);
+            alert("Could not load the host event list. Check your Firestore rules.");
+        });
     }
 
     function enableHostMode() {
-        document.body.classList.add('is-host');
-        document.getElementById('authPanel').innerHTML = `
-            <span style="font-size:0.85rem; color:var(--nice-color); font-weight:bold;">✓ Host Verified</span>
+        document.body.classList.add("is-host");
+        document.getElementById("authPanel").innerHTML = `
+            <span style="font-size:0.85rem;color:var(--nice-color);font-weight:bold;">✓ Host Verified</span>
             <button class="logout-btn" onclick="logout()">Lock Console</button>
         `;
     }
 
-    function updateEventState(id, field, value) {
-        const ev = events.find(e => e.id === id);
-        if (ev) {
-            ev[field] = value;
-            save();
-            render();
+    function showLogin() {
+        document.body.classList.remove("is-host");
+        document.getElementById("authPanel").innerHTML = `
+            <input type="email" id="emailInput" placeholder="Host email">
+            <input type="password" id="passwordInput" placeholder="Host password">
+            <button onclick="login()">Host Login</button>
+        `;
+    }
+
+    async function login() {
+        const email = document.getElementById("emailInput").value.trim();
+        const password = document.getElementById("passwordInput").value;
+        if (!email || !password) {
+            alert("Enter the host email and password.");
+            return;
+        }
+
+        try {
+            const credential = await auth.signInWithEmailAndPassword(email, password);
+            if (credential.user.uid !== HOST_UID) {
+                await auth.signOut();
+                alert("Unauthorized: this account is not the configured host.");
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Host login failed: " + error.message);
         }
     }
 
-    function addNewEvent() {
-        const txt = document.getElementById('newEventText').value.trim();
-        const type = document.getElementById('newEventType').value;
+    async function logout() {
+        if (privateUnsubscribe) privateUnsubscribe();
+        privateUnsubscribe = null;
+        await auth.signOut();
+        showLogin();
+        events = [];
+        // onAuthStateChanged signs the browser back in anonymously.
+    }
+
+    async function writeEvent(event) {
+        if (!auth.currentUser || auth.currentUser.uid !== HOST_UID) {
+            throw new Error("Host authentication required.");
+        }
+
+        const clean = {
+            id: String(event.id),
+            text: String(event.text),
+            type: ["nice", "neutral", "mean"].includes(event.type) ? event.type : "neutral",
+            known: !!event.known,
+            active: !!event.active
+        };
+
+        await db.collection("events").doc(clean.id).set(clean);
+
+        const publicRef = db.collection("publicEvents").doc(clean.id);
+        if (clean.known || clean.active) {
+            await publicRef.set(publicProjection(clean));
+        } else {
+            await publicRef.delete();
+        }
+    }
+
+    async function updateEventState(id, field, value) {
+        const ev = events.find(e => String(e.id) === String(id));
+        if (!ev) return;
+        ev[field] = value;
+
+        try {
+            await writeEvent(ev);
+        } catch (error) {
+            console.error(error);
+            alert("Could not save the event.");
+        }
+    }
+
+    async function addNewEvent() {
+        const txt = document.getElementById("newEventText").value.trim();
+        const type = document.getElementById("newEventType").value;
         if (!txt) return;
 
-        const newEv = {
-            id: Date.now(),
+        const event = {
+            id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
             text: txt,
             type: type,
-            known: true, // Custom manual entries default to known
+            known: true,
             active: false
         };
 
-        events.push(newEv);
-        document.getElementById('newEventText').value = '';
-        save();
-        render();
+        try {
+            await writeEvent(event);
+            document.getElementById("newEventText").value = "";
+        } catch (error) {
+            console.error(error);
+            alert("Could not add the event.");
+        }
     }
 
-    let sortMode = null;
-    let sortAscending = true;
-
     function searchableText(event) {
-        return [
-            event.text,
-            "name",
-            event.known ? "known" : "",
-            event.active ? "active" : "",
-            event.type,
-            event.type === "nice" ? "nice" : "",
-            event.type === "neutral" ? "neutral" : "",
-            event.type === "mean" ? "mean" : ""
-        ].join(" ").toLowerCase();
+        return [event.text, "name", event.known ? "known" : "",
+            event.active ? "active" : "", event.type].join(" ").toLowerCase();
     }
 
     function getFilteredAndSortedEvents() {
-        const searchInput = document.getElementById('eventSearch');
-        const filterInput = document.getElementById('kindnessFilter');
-
-        const search = searchInput ? searchInput.value.trim().toLowerCase() : "";
-        const kindnessFilter = filterInput ? filterInput.value : "all";
+        const search = document.getElementById("eventSearch")?.value.trim().toLowerCase() || "";
+        const kindnessFilter = document.getElementById("kindnessFilter")?.value || "all";
 
         let result = events.filter(event => {
-            const matchesSearch = !search || searchableText(event).includes(search);
-            const matchesKindness =
-                kindnessFilter === "all" || event.type === kindnessFilter;
-
-            return matchesSearch && matchesKindness;
+            return (!search || searchableText(event).includes(search)) &&
+                   (kindnessFilter === "all" || event.type === kindnessFilter);
         });
 
         const kindnessOrder = { nice: 0, neutral: 1, mean: 2 };
-
         if (sortMode === "name") {
             result.sort((a, b) => {
-                const comparison = a.text.localeCompare(
-                    b.text, undefined, { sensitivity: "base" }
-                );
-                return sortAscending ? comparison : -comparison;
+                const c = a.text.localeCompare(b.text, undefined, { sensitivity: "base" });
+                return sortAscending ? c : -c;
             });
         } else if (sortMode === "kindness") {
             result.sort((a, b) => {
-                const comparison =
-                    kindnessOrder[a.type] - kindnessOrder[b.type] ||
-                    a.text.localeCompare(
-                        b.text, undefined, { sensitivity: "base" }
-                    );
-
-                return sortAscending ? comparison : -comparison;
+                const c = kindnessOrder[a.type] - kindnessOrder[b.type] ||
+                    a.text.localeCompare(b.text, undefined, { sensitivity: "base" });
+                return sortAscending ? c : -c;
             });
         }
-
         return result;
     }
 
     function setSort(mode) {
-        if (sortMode === mode) {
-            sortAscending = !sortAscending;
-        } else {
-            sortMode = mode;
-            sortAscending = true;
-        }
+        if (sortMode === mode) sortAscending = !sortAscending;
+        else { sortMode = mode; sortAscending = true; }
 
-        const nameButton = document.getElementById('sortNameBtn');
-        const kindnessButton = document.getElementById('sortKindnessBtn');
+        const nameButton = document.getElementById("sortNameBtn");
+        const kindnessButton = document.getElementById("sortKindnessBtn");
 
         if (nameButton) {
-            nameButton.classList.toggle('active', sortMode === 'name');
-            nameButton.textContent = sortMode === 'name'
-                ? `Sort: Name ${sortAscending ? 'A→Z' : 'Z→A'}`
-                : 'Sort: Name ↕';
+            nameButton.classList.toggle("active", sortMode === "name");
+            nameButton.textContent = sortMode === "name"
+                ? `Sort: Name ${sortAscending ? "A→Z" : "Z→A"}` : "Sort: Name ↕";
         }
-
         if (kindnessButton) {
-            kindnessButton.classList.toggle('active', sortMode === 'kindness');
-            kindnessButton.textContent = sortMode === 'kindness'
-                ? `Sort: Kindness ${
-                    sortAscending
-                        ? 'Nice→Neutral→Mean'
-                        : 'Mean→Neutral→Nice'
-                }`
-                : 'Sort: Kindness ↕';
+            kindnessButton.classList.toggle("active", sortMode === "kindness");
+            kindnessButton.textContent = sortMode === "kindness"
+                ? `Sort: Kindness ${sortAscending ? "Nice→Neutral→Mean" : "Mean→Neutral→Nice"}`
+                : "Sort: Kindness ↕";
         }
-
         render();
     }
 
     function render() {
-        const hostList = document.getElementById('host-event-list');
-        const publicList = document.getElementById('public-event-list');
+        const hostList = document.getElementById("host-event-list");
+        const publicList = document.getElementById("public-event-list");
+        if (!hostList || !publicList) return;
 
-        hostList.innerHTML = '';
-        publicList.innerHTML = '';
+        hostList.innerHTML = "";
+        publicList.innerHTML = "";
 
+        const isHost = auth.currentUser && auth.currentUser.uid === HOST_UID;
         let counts = { nice: 0, neutral: 0, mean: 0 };
 
-        // Host view always shows every event.
-        events.forEach(e => {
-            counts[e.type]++;
+        if (isHost) {
+            events.forEach(e => {
+                counts[e.type]++;
+                const row = document.createElement("div");
+                row.className = "event-row";
+                const id = String(e.id).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+                row.innerHTML = `
+                    <div class="event-text">${escapeHtml(e.text)}</div>
+                    <div class="controls">
+                        <select onchange="updateEventState('${id}', 'type', this.value)">
+                            <option value="nice" ${e.type === "nice" ? "selected" : ""}>Nice</option>
+                            <option value="neutral" ${e.type === "neutral" ? "selected" : ""}>Neutral</option>
+                            <option value="mean" ${e.type === "mean" ? "selected" : ""}>Mean</option>
+                        </select>
+                        <label class="checkbox-label">
+                            <input type="checkbox" ${e.known ? "checked" : ""}
+                                onchange="updateEventState('${id}', 'known', this.checked)"> Known
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" ${e.active ? "checked" : ""}
+                                onchange="updateEventState('${id}', 'active', this.checked)"> Active
+                        </label>
+                    </div>`;
+                hostList.appendChild(row);
+            });
 
-            const hRow = document.createElement('div');
-            hRow.className = 'event-row';
-            hRow.innerHTML = `
-                <div class="event-text">${e.text}</div>
-                <div class="controls">
-                    <select onchange="updateEventState(${e.id}, 'type', this.value)">
-                        <option value="nice" ${e.type==='nice'?'selected':''}>Nice</option>
-                        <option value="neutral" ${e.type==='neutral'?'selected':''}>Neutral</option>
-                        <option value="mean" ${e.type==='mean'?'selected':''}>Mean</option>
-                    </select>
-                    <label class="checkbox-label">
-                        <input type="checkbox" ${e.known?'checked':''}
-                            onchange="updateEventState(${e.id}, 'known', this.checked)"> Known
-                    </label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" ${e.active?'checked':''}
-                            onchange="updateEventState(${e.id}, 'active', this.checked)"> Active
-                    </label>
-                </div>
-            `;
-            hostList.appendChild(hRow);
-        });
+            document.getElementById("count-nice").innerText = counts.nice;
+            document.getElementById("count-neutral").innerText = counts.neutral;
+            document.getElementById("count-mean").innerText = counts.mean;
+        }
 
-        // Public view uses the search, kindness filter, and sorting controls.
-        // Show all events to every visitor. The previous version filtered out
-        // every default event because new visitors have known=false and active=false.
         const visibleEvents = getFilteredAndSortedEvents();
-
         visibleEvents.forEach(e => {
-            const pRow = document.createElement('div');
-            pRow.className = 'event-row';
-
-            let badges = `<span class="badge badge-${e.type}">${e.type}</span>`;
-            if (e.active) {
-                badges += ` <span class="badge badge-active">Active</span>`;
-            }
-
-            pRow.innerHTML = `
-                <div class="event-text">${e.text}</div>
-                <div class="controls">${badges}</div>
-            `;
-            publicList.appendChild(pRow);
+            const row = document.createElement("div");
+            row.className = "event-row";
+            let badges = `<span class="badge badge-${escapeHtml(e.type)}">${escapeHtml(e.type)}</span>`;
+            if (e.active) badges += ` <span class="badge badge-active">Active</span>`;
+            row.innerHTML = `<div class="event-text">${escapeHtml(e.text)}</div>
+                             <div class="controls">${badges}</div>`;
+            publicList.appendChild(row);
         });
 
-        document.getElementById('count-nice').innerText = counts.nice;
-        document.getElementById('count-neutral').innerText = counts.neutral;
-        document.getElementById('count-mean').innerText = counts.mean;
-
-        if (visibleEvents.length === 0) {
-            const search = document.getElementById('eventSearch')?.value.trim();
-            publicList.innerHTML = search || document.getElementById('kindnessFilter')?.value !== 'all'
+        if (!visibleEvents.length) {
+            const search = document.getElementById("eventSearch")?.value.trim();
+            publicList.innerHTML = search || document.getElementById("kindnessFilter")?.value !== "all"
                 ? '<div class="no-results">No events match your search or filter.</div>'
-                : '<div style="color:var(--text-muted); padding:10px; text-align:center;">No events are available.</div>';
+                : '<div style="color:var(--text-muted);padding:10px;text-align:center;">No wheel events have been discovered yet by the community.</div>';
         }
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
-        const search = document.getElementById('eventSearch');
-        if (search) search.addEventListener('input', render);
+    document.addEventListener("DOMContentLoaded", () => {
+        const search = document.getElementById("eventSearch");
+        if (search) search.addEventListener("input", render);
     });
 
-    window.onload = init;
+    async function init() {
+        if (!firebaseConfigured()) {
+            document.getElementById("public-event-list").innerHTML =
+                '<div class="no-results">Firebase is not configured. Fill in firebaseConfig and HOST_UID in the script.</div>';
+            return;
+        }
+
+        auth.onAuthStateChanged(async user => {
+            if (user && user.uid === HOST_UID) {
+                enableHostMode();
+                try {
+                    await seedDefaultsIfEmpty();
+                    listenPrivateEvents();
+                } catch (error) {
+                    console.error(error);
+                    alert("Could not initialise Firebase event data. Check your Firestore rules.");
+                }
+            } else {
+                showLogin();
+                if (privateUnsubscribe) {
+                    privateUnsubscribe();
+                    privateUnsubscribe = null;
+                }
+                if (user && user.isAnonymous) {
+                    listenPublicEvents();
+                } else if (!user) {
+                    auth.signInAnonymously().catch(error => {
+                        console.error(error);
+                        document.getElementById("public-event-list").innerHTML =
+                            '<div class="no-results">Unable to connect to Firebase.</div>';
+                    });
+                }
+            }
+            render();
+        });
+    }
+
+    window.addEventListener("load", init);
 </script>
+
 </body>
 </html>
