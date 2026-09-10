@@ -573,8 +573,9 @@ async function verifyHostIdentity() {
         });
 
         // Public view uses the search, kindness filter, and sorting controls.
-        const visibleEvents = getFilteredAndSortedEvents()
-            .filter(e => e.known || e.active);
+        // Show all events to every visitor. The previous version filtered out
+        // every default event because new visitors have known=false and active=false.
+        const visibleEvents = getFilteredAndSortedEvents();
 
         visibleEvents.forEach(e => {
             const pRow = document.createElement('div');
@@ -600,7 +601,7 @@ async function verifyHostIdentity() {
             const search = document.getElementById('eventSearch')?.value.trim();
             publicList.innerHTML = search || document.getElementById('kindnessFilter')?.value !== 'all'
                 ? '<div class="no-results">No events match your search or filter.</div>'
-                : '<div style="color:var(--text-muted); padding:10px; text-align:center;">No wheel events have been discovered yet by the community.</div>';
+                : '<div style="color:var(--text-muted); padding:10px; text-align:center;">No events are available.</div>';
         }
     }
 
