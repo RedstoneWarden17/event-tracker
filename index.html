@@ -226,10 +226,32 @@
 </div>
 
 <script>
+    const HASHED_PASSWORD_TARGET = "4ba88c14d9b4b0e9803b8e4e9b97779b5b95ea2e68846c4f828a2a7a40bcf14f";
     // Double validation protection
     // Change this to your desired secret security string
-    const SECURITY_HASH = "archipelago123"; 
-    let isAuthorizedHost = false;
+async function calculateSHA256(string) {
+    const msgBuffer = new TextEncoder().encode(string);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}    
+async function verifyHostIdentity() {
+    const inputPass = document.getElementById('masterPass').value;
+    const errorElement = document.getElementById('authError');
+
+    // Scramble the inputs to match against our hidden footprint targets
+    const hashedInputPass = await calculateSHA256(inputPass);
+
+    if (hashedInputPass === HASHED_PASSWORD_TARGET) {
+        sessionStorage.setItem('host_secure_token', 'AUTHORIZED_SESSION_KEY_TRUE');
+        errorElement.textContent = "";
+        document.getElementById('authPanel').classList.add('hidden');
+        document.getElementById('authBtn').classList.add('hidden');
+        checkSessionAuth();
+    } else {
+        errorElement.textContent = "CRITICAL ERROR: Authorization vectors failed. Incorrect credentials.";
+    }
+}
 
     // 54 Core baseline events matching perfectly your list
     const defaultEvents = [
