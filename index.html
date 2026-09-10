@@ -160,6 +160,28 @@
 
         .add-event-form input { flex-grow: 1; }
 
+
+        .event-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .event-toolbar input {
+            flex: 1 1 260px;
+        }
+
+        .sort-btn.active {
+            outline: 2px solid white;
+        }
+
+        .no-results {
+            color: var(--text-muted);
+            padding: 12px;
+            text-align: center;
+        }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -220,13 +242,32 @@
         <!-- PUBLIC VIEW -->
         <div class="card">
             <h2>Community Event View</h2>
+
+            <div class="event-toolbar">
+                <input type="search" id="eventSearch"
+                    placeholder="Search name, Known, Active, Nice, Neutral, Mean...">
+
+                <button type="button" id="sortNameBtn" class="sort-btn"
+                    onclick="setSort('name')">Sort: Name ↕</button>
+
+                <button type="button" id="sortKindnessBtn" class="sort-btn"
+                    onclick="setSort('kindness')">Sort: Kindness ↕</button>
+
+                <select id="kindnessFilter" onchange="render()">
+                    <option value="all">All Kindness</option>
+                    <option value="nice">Nice</option>
+                    <option value="neutral">Neutral</option>
+                    <option value="mean">Mean</option>
+                </select>
+            </div>
+
             <div id="public-event-list"></div>
         </div>
     </div>
 </div>
 
 <script>
-    const HASHED_PASSWORD_TARGET = "4ba88c14d9b4b0e9803b8e4e9b97779b5b95ea2e68846c4f828a2a7a40bcf14f";
+    const HASHED_PASSWORD_TARGET = "5d08a031d6d7c37851c6159556480da27aeb59487b6a7f83e2f4eb78c0b5bde2";
     // Double validation protection
     // Change this to your desired secret security string
 async function calculateSHA256(string) {
@@ -343,9 +384,17 @@ async function verifyHostIdentity() {
         localStorage.setItem('ap_events_dashboard', JSON.stringify(events));
     }
 
-    function login() {
+    async function login() {
         const pin = document.getElementById('passwordInput').value;
-        if (pin === SECURITY_HASH) {
+
+        if (!pin) {
+            alert("Please enter the Host Key.");
+            return;
+        }
+
+        const hashedPin = await calculateSHA256(pin);
+
+        if (hashedPin === HASHED_PASSWORD_TARGET) {
             sessionStorage.setItem('host_verified', 'true');
             enableHostMode();
             render();
@@ -400,19 +449,106 @@ async function verifyHostIdentity() {
         render();
     }
 
+    let sortMode = null;
+    let sortAscending = true;
+
+    function searchableText(event) {
+        return [
+            event.text,
+            "name",
+            event.known ? "known" : "",
+            event.active ? "active" : "",
+            event.type,
+            event.type === "nice" ? "nice" : "",
+            event.type === "neutral" ? "neutral" : "",
+            event.type === "mean" ? "mean" : ""
+        ].join(" ").toLowerCase();
+    }
+
+    function getFilteredAndSortedEvents() {
+        const searchInput = document.getElementById('eventSearch');
+        const filterInput = document.getElementById('kindnessFilter');
+
+        const search = searchInput ? searchInput.value.trim().toLowerCase() : "";
+        const kindnessFilter = filterInput ? filterInput.value : "all";
+
+        let result = events.filter(event => {
+            const matchesSearch = !search || searchableText(event).includes(search);
+            const matchesKindness =
+                kindnessFilter === "all" || event.type === kindnessFilter;
+
+            return matchesSearch && matchesKindness;
+        });
+
+        const kindnessOrder = { nice: 0, neutral: 1, mean: 2 };
+
+        if (sortMode === "name") {
+            result.sort((a, b) => {
+                const comparison = a.text.localeCompare(
+                    b.text, undefined, { sensitivity: "base" }
+                );
+                return sortAscending ? comparison : -comparison;
+            });
+        } else if (sortMode === "kindness") {
+            result.sort((a, b) => {
+                const comparison =
+                    kindnessOrder[a.type] - kindnessOrder[b.type] ||
+                    a.text.localeCompare(
+                        b.text, undefined, { sensitivity: "base" }
+                    );
+
+                return sortAscending ? comparison : -comparison;
+            });
+        }
+
+        return result;
+    }
+
+    function setSort(mode) {
+        if (sortMode === mode) {
+            sortAscending = !sortAscending;
+        } else {
+            sortMode = mode;
+            sortAscending = true;
+        }
+
+        const nameButton = document.getElementById('sortNameBtn');
+        const kindnessButton = document.getElementById('sortKindnessBtn');
+
+        if (nameButton) {
+            nameButton.classList.toggle('active', sortMode === 'name');
+            nameButton.textContent = sortMode === 'name'
+                ? `Sort: Name ${sortAscending ? 'A→Z' : 'Z→A'}`
+                : 'Sort: Name ↕';
+        }
+
+        if (kindnessButton) {
+            kindnessButton.classList.toggle('active', sortMode === 'kindness');
+            kindnessButton.textContent = sortMode === 'kindness'
+                ? `Sort: Kindness ${
+                    sortAscending
+                        ? 'Nice→Neutral→Mean'
+                        : 'Mean→Neutral→Nice'
+                }`
+                : 'Sort: Kindness ↕';
+        }
+
+        render();
+    }
+
     function render() {
         const hostList = document.getElementById('host-event-list');
         const publicList = document.getElementById('public-event-list');
-        
+
         hostList.innerHTML = '';
         publicList.innerHTML = '';
 
         let counts = { nice: 0, neutral: 0, mean: 0 };
 
+        // Host view always shows every event.
         events.forEach(e => {
             counts[e.type]++;
 
-            // Host View Row
             const hRow = document.createElement('div');
             hRow.className = 'event-row';
             hRow.innerHTML = `
@@ -424,42 +560,54 @@ async function verifyHostIdentity() {
                         <option value="mean" ${e.type==='mean'?'selected':''}>Mean</option>
                     </select>
                     <label class="checkbox-label">
-                        <input type="checkbox" ${e.known?'checked':''} onchange="updateEventState(${e.id}, 'known', this.checked)"> Known
+                        <input type="checkbox" ${e.known?'checked':''}
+                            onchange="updateEventState(${e.id}, 'known', this.checked)"> Known
                     </label>
                     <label class="checkbox-label">
-                        <input type="checkbox" ${e.active?'checked':''} onchange="updateEventState(${e.id}, 'active', this.checked)"> Active
+                        <input type="checkbox" ${e.active?'checked':''}
+                            onchange="updateEventState(${e.id}, 'active', this.checked)"> Active
                     </label>
                 </div>
             `;
             hostList.appendChild(hRow);
-
-            // Public View Filter (Only display if Known or Active)
-            if (e.known || e.active) {
-                const pRow = document.createElement('div');
-                pRow.className = 'event-row';
-                
-                let badges = `<span class="badge badge-${e.type}">${e.type}</span>`;
-                if (e.active) {
-                    badges += ` <span class="badge badge-active">Active</span>`;
-                }
-
-                pRow.innerHTML = `
-                    <div class="event-text">${e.text}</div>
-                    <div class="controls">${badges}</div>
-                `;
-                publicList.appendChild(pRow);
-            }
         });
 
-        // Update counts
+        // Public view uses the search, kindness filter, and sorting controls.
+        const visibleEvents = getFilteredAndSortedEvents()
+            .filter(e => e.known || e.active);
+
+        visibleEvents.forEach(e => {
+            const pRow = document.createElement('div');
+            pRow.className = 'event-row';
+
+            let badges = `<span class="badge badge-${e.type}">${e.type}</span>`;
+            if (e.active) {
+                badges += ` <span class="badge badge-active">Active</span>`;
+            }
+
+            pRow.innerHTML = `
+                <div class="event-text">${e.text}</div>
+                <div class="controls">${badges}</div>
+            `;
+            publicList.appendChild(pRow);
+        });
+
         document.getElementById('count-nice').innerText = counts.nice;
         document.getElementById('count-neutral').innerText = counts.neutral;
         document.getElementById('count-mean').innerText = counts.mean;
 
-        if (publicList.children.length === 0) {
-            publicList.innerHTML = '<div style="color:var(--text-muted); padding:10px; text-align:center;">No wheel events have been discovered yet by the community.</div>';
+        if (visibleEvents.length === 0) {
+            const search = document.getElementById('eventSearch')?.value.trim();
+            publicList.innerHTML = search || document.getElementById('kindnessFilter')?.value !== 'all'
+                ? '<div class="no-results">No events match your search or filter.</div>'
+                : '<div style="color:var(--text-muted); padding:10px; text-align:center;">No wheel events have been discovered yet by the community.</div>';
         }
     }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const search = document.getElementById('eventSearch');
+        if (search) search.addEventListener('input', render);
+    });
 
     window.onload = init;
 </script>
