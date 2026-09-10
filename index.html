@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Archipelago Multiworld Event Tracker</title>
+    <style>
+        :root {
+            --bg-main: #121214;
+            --bg-card: #1a1a1e;
+            --bg-input: #26262b;
+            --border: #33333a;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --nice-color: #22c55e;
+            --neutral-color: #3b82f6;
+            --mean-color: #ef4444;
+            --accent: #a855f7;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+        }
+
+        h1 { margin: 0; font-size: 1.5rem; color: #fff; }
+
+        .auth-panel {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        input, select, button {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        input:focus, select:focus {
+            outline: 1px solid var(--accent);
+        }
+
+        button {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        button:hover { opacity: 0.9; }
+        
+        .logout-btn {
+            background-color: #475569;
+        }
+
+        .host-only {
+            display: none;
+        }
+
+        body.is-host .host-only {
+            display: block;
+        }
+
+        .panel-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        body.is-host .panel-grid {
+            grid-template-columns: 1.2fr 1fr;
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            margin-top: 0;
+            font-size: 1.2rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+        }
+
+        .event-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px;
+            border-bottom: 1px solid var(--border);
+            gap: 10px;
+        }
+
+        .event-row:last-child { border-bottom: none; }
+
+        .event-text { flex-grow: 1; font-size: 0.95rem; }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .badge {
+            font-size: 0.75rem;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .badge-nice { background-color: rgba(34, 197, 94, 0.2); color: var(--nice-color); }
+        .badge-neutral { background-color: rgba(59, 130, 246, 0.2); color: var(--neutral-color); }
+        .badge-mean { background-color: rgba(239, 68, 68, 0.2); color: var(--mean-color); }
+        .badge-active { background-color: #f59e0b; color: #121214; }
+
+        .add-event-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .add-event-form input { flex-grow: 1; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .stat-box {
+            padding: 10px;
+            background: var(--bg-input);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        .stat-val { font-size: 1.2rem; font-weight: bold; }
+        .stat-lbl { font-size: 0.75rem; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div>
+            <h1>Archipelago Event Hub</h1>
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Public Tracker / Host Console</div>
+        </div>
+        <div class="auth-panel" id="authPanel">
+            <input type="password" id="passwordInput" placeholder="Enter Host Key...">
+            <button onclick="login()">Login</button>
+        </div>
+    </header>
+
+    <div class="panel-grid">
+        <!-- HOST CONSOLE -->
+        <div class="card host-only">
+            <h2>Host Configuration</h2>
+            
+            <div class="stats-grid">
+                <div class="stat-box" style="border-color: var(--nice-color)"><div class="stat-val" id="count-nice">0</div><div class="stat-lbl">Nice</div></div>
+                <div class="stat-box" style="border-color: var(--neutral-color)"><div class="stat-val" id="count-neutral">0</div><div class="stat-lbl">Neutral</div></div>
+                <div class="stat-box" style="border-color: var(--mean-color)"><div class="stat-val" id="count-mean">0</div><div class="stat-lbl">Mean</div></div>
+            </div>
+
+            <div id="host-event-list"></div>
+
+            <div class="add-event-form">
+                <input type="text" id="newEventText" placeholder="Add custom event text...">
+                <select id="newEventType">
+                    <option value="nice">Nice</option>
+                    <option value="neutral" selected>Neutral</option>
+                    <option value="mean">Mean</option>
+                </select>
+                <button onclick="addNewEvent()">Add</button>
+            </div>
+        </div>
+
+        <!-- PUBLIC VIEW -->
+        <div class="card">
+            <h2>Community Event View</h2>
+            <div id="public-event-list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Double validation protection
+    // Change this to your desired secret security string
+    const SECURITY_HASH = "archipelago123"; 
+    let isAuthorizedHost = false;
+
+    // 54 Core baseline events matching perfectly your list
+    const defaultEvents = [
+        { text: "Chaos Spin (Spin the Chaos Wheel)", type: "neutral" },
+        { text: "!release off", type: "mean" },
+        { text: "Discord disabled for a day (If you send a message, your slot has !release permanently disabled)", type: "mean" },
+        { text: "Hint cost TRIPLED", type: "mean" },
+        { text: "!collect manual on goal", type: "neutral" },
+        { text: "Hint cost halved", type: "nice" },
+        { text: "!remaining on", type: "nice" },
+        { text: "Deathlink is enabled for everyone that can enable it", type: "mean" },
+        { text: "!remaining off", type: "mean" },
+        { text: "!collect automatic on goal", type: "nice" },
+        { text: "Nothing", type: "neutral" },
+        { text: "!release manual on goal", type: "neutral" },
+        { text: "!collect off", type: "mean" },
+        { text: "The player with the lowest check percentage gets 2 random items", type: "nice" },
+        { text: "1 free hint per slot", type: "nice" },
+        { text: "Double Hint Points from each location for the rest of the Async", type: "nice" },
+        { text: "Nice Spin (Spin the Wheel of Benevolence)", type: "nice" },
+        { text: "Every 10,000 checks gotten in the next 24 hrs give everyone 1 free hint", type: "nice" },
+        { text: "Hinting disabled for 3 days", type: "mean" },
+        { text: "1 location from the smallest incomplete game is hinted", type: "nice" },
+        { text: "Half (round up) Hint Points from each location for the rest of the Async", type: "mean" },
+        { text: "3 locations from the largest incomplete game are hinted", type: "nice" },
+        { text: "Next event spin spins twice", type: "neutral" },
+        { text: "Hint cost Reset", type: "neutral" },
+        { text: "5 Completely random hints", type: "nice" },
+        { text: "1 item from the smallest incomplete game is hinted", type: "nice" },
+        { text: "Spin twice. The host chooses the 'meaner' option", type: "mean" },
+        { text: "3 items from the largest incomplete game are hinted", type: "nice" },
+        { text: "All slots with 10 or less remaining checks are !released and !collected", type: "nice" },
+        { text: "Hint cost set to 1 percent for the next hour", type: "nice" },
+        { text: "Hint Points from each location Reset", type: "neutral" },
+        { text: "Next 3 events are hidden from the community", type: "mean" },
+        { text: "Deathlink is disabled for everyone that can disable it", type: "nice" },
+        { text: "Every event spin from now on includes an additional spin on the Wheel of Benevolence", type: "nice" },
+        { text: "Remove random event from the wheel", type: "neutral" },
+        { text: "Every event spin from now on includes an additional spin on the Chaos Wheel", type: "mean" },
+        { text: "Hint cost doubled", type: "mean" },
+        { text: "Progression Blocking Item Location Revealed", type: "nice" },
+        { text: "1 free hint per player", type: "nice" },
+        { text: "Spin twice and create a 1hr poll between the two", type: "neutral" },
+        { text: "One completely random player gets the exact location of their next required progression item DM'd to them.", type: "nice" },
+        { text: "Spin again. The event that the wheel lands on happens twice.", type: "neutral" },
+        { text: "All slots over 95% completion are !released", type: "nice" },
+        { text: "Every event spin from now on includes an additional spin on the Normal Events Wheel", type: "neutral" },
+        { text: "Next event spin spins three times", type: "neutral" },
+        { text: "Spin three times and create a 1hr poll between them", type: "neutral" },
+        { text: "Spin the wheel again; whatever lands applies to the top 3 players (progression wise).", type: "neutral" },
+        { text: "The first player to find a progression item in the next hour gets 3 free hints for their slot.", type: "nice" },
+        { text: "!remaining, !collect, !release Reset", type: "neutral" },
+        { text: "Random Item Location Revealed", type: "nice" },
+        { text: "!release automatic on goal", type: "nice" },
+        { text: "Spin twice. The host chooses the 'nicer' option", type: "nice" },
+        { text: "Hint cost set to 1 percent for the next 2 hours", type: "nice" },
+        { text: "2 free hints per player", type: "nice" }
+    ];
+
+    let events = [];
+
+    function init() {
+        const stored = localStorage.getItem('ap_events_dashboard');
+        if (stored) {
+            try { events = JSON.parse(stored); } catch(e) { events = loadDefaults(); }
+        } else {
+            events = loadDefaults();
+        }
+        
+        // Verification session check
+        if (sessionStorage.getItem('host_verified') === 'true') {
+            enableHostMode();
+        }
+        
+        render();
+    }
+
+    function loadDefaults() {
+        return defaultEvents.map((e, idx) => ({
+            id: idx,
+            text: e.text,
+            type: e.type,
+            known: false,
+            active: false
+        }));
+    }
+
+    function save() {
+        localStorage.setItem('ap_events_dashboard', JSON.stringify(events));
+    }
+
+    function login() {
+        const pin = document.getElementById('passwordInput').value;
+        if (pin === SECURITY_HASH) {
+            sessionStorage.setItem('host_verified', 'true');
+            enableHostMode();
+            render();
+        } else {
+            alert("Unauthorized: Host key verification failed.");
+        }
+    }
+
+    function logout() {
+        sessionStorage.removeItem('host_verified');
+        document.body.classList.remove('is-host');
+        document.getElementById('authPanel').innerHTML = `
+            <input type="password" id="passwordInput" placeholder="Enter Host Key...">
+            <button onclick="login()">Login</button>
+        `;
+        render();
+    }
+
+    function enableHostMode() {
+        document.body.classList.add('is-host');
+        document.getElementById('authPanel').innerHTML = `
+            <span style="font-size:0.85rem; color:var(--nice-color); font-weight:bold;">✓ Host Verified</span>
+            <button class="logout-btn" onclick="logout()">Lock Console</button>
+        `;
+    }
+
+    function updateEventState(id, field, value) {
+        const ev = events.find(e => e.id === id);
+        if (ev) {
+            ev[field] = value;
+            save();
+            render();
+        }
+    }
+
+    function addNewEvent() {
+        const txt = document.getElementById('newEventText').value.trim();
+        const type = document.getElementById('newEventType').value;
+        if (!txt) return;
+
+        const newEv = {
+            id: Date.now(),
+            text: txt,
+            type: type,
+            known: true, // Custom manual entries default to known
+            active: false
+        };
+
+        events.push(newEv);
+        document.getElementById('newEventText').value = '';
+        save();
+        render();
+    }
+
+    function render() {
+        const hostList = document.getElementById('host-event-list');
+        const publicList = document.getElementById('public-event-list');
+        
+        hostList.innerHTML = '';
+        publicList.innerHTML = '';
+
+        let counts = { nice: 0, neutral: 0, mean: 0 };
+
+        events.forEach(e => {
+            counts[e.type]++;
+
+            // Host View Row
+            const hRow = document.createElement('div');
+            hRow.className = 'event-row';
+            hRow.innerHTML = `
+                <div class="event-text">${e.text}</div>
+                <div class="controls">
+                    <select onchange="updateEventState(${e.id}, 'type', this.value)">
+                        <option value="nice" ${e.type==='nice'?'selected':''}>Nice</option>
+                        <option value="neutral" ${e.type==='neutral'?'selected':''}>Neutral</option>
+                        <option value="mean" ${e.type==='mean'?'selected':''}>Mean</option>
+                    </select>
+                    <label class="checkbox-label">
+                        <input type="checkbox" ${e.known?'checked':''} onchange="updateEventState(${e.id}, 'known', this.checked)"> Known
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" ${e.active?'checked':''} onchange="updateEventState(${e.id}, 'active', this.checked)"> Active
+                    </label>
+                </div>
+            `;
+            hostList.appendChild(hRow);
+
+            // Public View Filter (Only display if Known or Active)
+            if (e.known || e.active) {
+                const pRow = document.createElement('div');
+                pRow.className = 'event-row';
+                
+                let badges = `<span class="badge badge-${e.type}">${e.type}</span>`;
+                if (e.active) {
+                    badges += ` <span class="badge badge-active">Active</span>`;
+                }
+
+                pRow.innerHTML = `
+                    <div class="event-text">${e.text}</div>
+                    <div class="controls">${badges}</div>
+                `;
+                publicList.appendChild(pRow);
+            }
+        });
+
+        // Update counts
+        document.getElementById('count-nice').innerText = counts.nice;
+        document.getElementById('count-neutral').innerText = counts.neutral;
+        document.getElementById('count-mean').innerText = counts.mean;
+
+        if (publicList.children.length === 0) {
+            publicList.innerHTML = '<div style="color:var(--text-muted); padding:10px; text-align:center;">No wheel events have been discovered yet by the community.</div>';
+        }
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>
